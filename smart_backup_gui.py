@@ -1,12 +1,11 @@
 import os
 import shutil
 import pandas as pd
-import logging
 from datetime import datetime
 from pathlib import Path
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-from tkinter import filedialog, messagebox, scrolledtext, END
+from tkinter import filedialog, messagebox, scrolledtext, END, N, S, E, W, BOTH
 
 class BackupApp:
     def __init__(self, root):
@@ -15,11 +14,17 @@ class BackupApp:
         self.csv_path = ttk.StringVar()
         self.backup_path = ttk.StringVar(value="C:/Backups")
         self.ext_filter = ttk.StringVar(value=".py,.vba,.md,.docx,.xlsx,.pdf,.ps1")
+        self.exclude_filter = ttk.StringVar(value=".git,venv,__pycache__")
         self.setup_ui()
 
     def setup_ui(self):
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill=BOTH, expand=True)
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+
+        frm.columnconfigure(1, weight=1)
+        frm.rowconfigure(7, weight=1)
 
         ttk.Label(frm, text="CSV File:").grid(row=0, column=0, sticky=W)
         ttk.Entry(frm, textvariable=self.csv_path, width=60).grid(row=0, column=1)
@@ -32,14 +37,20 @@ class BackupApp:
         ttk.Label(frm, text="Extensions to include (comma-separated):").grid(row=2, column=0, columnspan=2, sticky=W)
         ttk.Entry(frm, textvariable=self.ext_filter, width=60).grid(row=3, column=0, columnspan=2, sticky=W)
 
-        ttk.Button(frm, text="Preview Backup", bootstyle=INFO, command=self.preview_backup).grid(row=4, column=0, pady=10)
-        ttk.Button(frm, text="Run Backup", bootstyle=SUCCESS, command=self.run_backup).grid(row=4, column=1, pady=10, sticky=E)
-        ttk.Button(frm, text="Exit", bootstyle=DANGER, command=self.root.quit).grid(row=4, column=2, pady=10)
+        ttk.Label(frm, text="Exclude folders (comma-separated):").grid(row=4, column=0, columnspan=2, sticky=W)
+        ttk.Entry(frm, textvariable=self.exclude_filter, width=60).grid(row=5, column=0, columnspan=2, sticky=W)
 
-        self.log_output = scrolledtext.ScrolledText(frm, height=20)
-        self.log_output.grid(row=5, column=0, columnspan=3, sticky=NSEW)
-        frm.rowconfigure(5, weight=1)
-        frm.columnconfigure(1, weight=1)
+        ttk.Button(frm, text="Preview Backup", bootstyle=INFO, command=self.preview_backup).grid(row=6, column=0, pady=10)
+        ttk.Button(frm, text="Run Backup", bootstyle=SUCCESS, command=self.run_backup).grid(row=6, column=1, pady=10, sticky=E)
+        ttk.Button(frm, text="Exit", bootstyle=DANGER, command=self.root.quit).grid(row=6, column=2, pady=10)
+
+        self.log_output = scrolledtext.ScrolledText(frm, height=20, wrap='word', font=('Courier New', 10))
+        self.log_output.grid(row=7, column=0, columnspan=3, sticky=N+S+E+W)
+        self.log_output.insert(END, "Welcome to the Smart Backup Tool!\n")
+        self.log_output.insert(END, "Please select a CSV file and a backup folder.\n")
+        self.log_output.insert(END, "You can filter files by extensions and exclude specific folders.\n")
+        self.log_output.insert(END, "Click 'Preview Backup' to see the files that will be backed up.\n")
+        self.log_output.insert(END, "Click 'Run Backup' to start the backup process.\n")
 
     def browse_csv(self):
         file = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
@@ -62,15 +73,25 @@ class BackupApp:
 
             if 'file_path' not in df.columns:
                 if {'Path', 'Name'}.issubset(df.columns):
-                    df['file_path'] = df.apply(
-                        lambda row: os.path.join(str(row['Path']).strip(), str(row['Name']).strip()), axis=1)
+                    df['file_path'] = df.apply(lambda row: os.path.join(str(row['Path']).strip(), str(row['Name']).strip()), axis=1)
                     self.log("🛠 'file_path' column generated from 'Path' + 'Name'")
                 else:
                     raise ValueError("CSV must contain either 'file_path' or both 'Path' and 'Name' columns.")
 
             exts = {e.strip().lower() for e in self.ext_filter.get().split(',') if e.strip()}
+            excludes = {e.strip().lower() for e in self.exclude_filter.get().split(',') if e.strip()}
             df['file_path'] = df['file_path'].astype(str).str.strip()
-            df['valid'] = df['file_path'].apply(lambda f: Path(f).exists() and Path(f).suffix.lower() in exts)
+
+            def is_valid_file(p):
+                try:
+                    path_obj = Path(p)
+                    if not path_obj.exists() or path_obj.suffix.lower() not in exts:
+                        return False
+                    return not any(part.lower() in excludes for part in path_obj.parts)
+                except Exception:
+                    return False
+
+            df['valid'] = df['file_path'].apply(is_valid_file)
             return df[df['valid']].copy(), exts
 
         except Exception as e:
@@ -86,7 +107,6 @@ class BackupApp:
 
         total_files = len(df)
         total_size = sum(Path(p).stat().st_size for p in df['file_path'])
-
         size_mb = total_size / (1024 * 1024)
         self.log(f"🔍 Preview:")
         self.log(f"🧾 Files matched: {total_files}")
@@ -94,7 +114,6 @@ class BackupApp:
 
     def run_backup(self):
         self.log_output.delete(1.0, END)
-
         backup_root = Path(self.backup_path.get())
         if not backup_root.exists():
             messagebox.showerror("Error", "Invalid Backup path.")
@@ -142,6 +161,6 @@ class BackupApp:
         self.log(f"❌ Failed: {failed}")
 
 if __name__ == '__main__':
-    app = ttk.Window(themename="darkly", size=(950, 700))
+    app = ttk.Window(themename="darkly", size=(600, 400))
     BackupApp(app)
     app.mainloop()
